@@ -99,7 +99,22 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const exportPdf = () => window.print()
+  const exportPdf = async () => {
+    const preview = document.getElementById('preview')
+    if (!preview) return
+
+    const { default: html2pdf } = await import('html2pdf.js')
+    const opt = {
+      margin: 10,
+      filename: 'markdown-preview.pdf',
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const },
+      pagebreak: { mode: ['css', 'legacy'] },
+    }
+
+    await html2pdf().set(opt).from(preview).save()
+  }
 
   return (
     <main className={dark ? 'app dark' : 'app'}>
