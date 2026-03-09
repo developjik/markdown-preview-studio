@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import mermaid from 'mermaid'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
+import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
+import CodeMirror from '@uiw/react-codemirror'
+import { markdown } from '@codemirror/lang-markdown'
+import { keymap } from '@codemirror/view'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { basicSetup } from 'codemirror'
 import 'highlight.js/styles/github-dark.css'
 import './App.css'
 
@@ -30,6 +36,13 @@ graph TD
   B --> C[Export]
 \`\`\`
 `
+
+type CollabState = {
+  ydoc: Y.Doc
+  provider: WebrtcProvider
+  ytext: Y.Text
+  undoManager: Y.UndoManager
+}
 
 function MermaidBlock({ chart }: { chart: string }) {
   const [svg, setSvg] = useState<string>('')
@@ -87,73 +100,85 @@ function randomRoom() {
   return `room-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function randomUser() {
+  const names = ['Sky', 'Jik', 'Nova', 'Luna', 'Theo', 'Hana']
+  const colors = ['#7c3aed', '#2563eb', '#059669', '#dc2626', '#d97706', '#0f766e']
+  return {
+    name: `${names[Math.floor(Math.random() * names.length)]}-${Math.floor(Math.random() * 100)}`,
+    color: colors[Math.floor(Math.random() * colors.length)],
+  }
+}
+
 function App() {
-  const [readOnly, setReadOnly] = useState<boolean>(false)
+  const [readOnly, setReadOnly] = useState(false)
   const [roomId, setRoomId] = useState<string | null>(null)
-  const [markdown, setMarkdown] = useState<string>(() => {
+  const [markdownText, setMarkdownText] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search)
     const mdParam = params.get('md')
     const decoded = mdParam ? decodeMdParam(mdParam) : null
     return decoded || localStorage.getItem('md-content') || SAMPLE
   })
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem('md-dark') === '1')
-  const yTextRef = useRef<Y.Text | null>(null)
+  const [collab, setCollab] = useState<CollabState | null>(null)
   const syncingRef = useRef(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const readonly = params.get('readonly') === '1'
-    const room = params.get('room')
-    setReadOnly(readonly)
-    setRoomId(room)
+    setReadOnly(params.get('readonly') === '1')
+    setRoomId(params.get('room'))
   }, [])
 
   useEffect(() => {
-    if (!roomId) return
+    if (!roomId) {
+      setCollab(null)
+      return
+    }
 
     const ydoc = new Y.Doc()
     const provider = new WebrtcProvider(roomId, ydoc)
-    const yText = ydoc.getText('markdown')
-    yTextRef.current = yText
+    const ytext = ydoc.getText('markdown')
+    const undoManager = new Y.UndoManager(ytext)
 
-    if (yText.length === 0 && markdown) {
-      yText.insert(0, markdown)
-    } else {
-      syncingRef.current = true
-      setMarkdown(yText.toString())
-      syncingRef.current = false
+    provider.awareness.setLocalStateField('user', randomUser())
+
+    if (ytext.length === 0) {
+      ytext.insert(0, markdownText)
     }
 
     const observer = () => {
       syncingRef.current = true
-      setMarkdown(yText.toString())
+      setMarkdownText(ytext.toString())
       syncingRef.current = false
     }
+    ytext.observe(observer)
 
-    yText.observe(observer)
+    setCollab({ ydoc, provider, ytext, undoManager })
 
     return () => {
-      yText.unobserve(observer)
+      ytext.unobserve(observer)
       provider.destroy()
       ydoc.destroy()
-      yTextRef.current = null
+      setCollab(null)
     }
   }, [roomId])
 
   useEffect(() => {
-    if (roomId) {
-      if (!syncingRef.current && yTextRef.current && yTextRef.current.toString() !== markdown) {
-        yTextRef.current.delete(0, yTextRef.current.length)
-        yTextRef.current.insert(0, markdown)
-      }
-      return
-    }
-    if (!readOnly) localStorage.setItem('md-content', markdown)
-  }, [markdown, readOnly, roomId])
+    if (!roomId && !readOnly) localStorage.setItem('md-content', markdownText)
+  }, [markdownText, roomId, readOnly])
 
   useEffect(() => {
     localStorage.setItem('md-dark', dark ? '1' : '0')
   }, [dark])
+
+  const editorExtensions = useMemo(() => {
+    const extensions = [basicSetup, markdown()]
+    if (dark) extensions.push(oneDark)
+    if (collab) {
+      extensions.push(yCollab(collab.ytext, collab.provider.awareness, { undoManager: collab.undoManager }))
+      extensions.push(keymap.of([...yUndoManagerKeymap]))
+    }
+    return extensions
+  }, [dark, collab])
 
   const exportHtml = () => {
     const html = `<!doctype html><html><head><meta charset="UTF-8"/><title>Export</title></head><body>${document.getElementById('preview')?.innerHTML || ''}</body></html>`
@@ -169,7 +194,6 @@ function App() {
   const exportPdf = async () => {
     const preview = document.getElementById('preview')
     if (!preview) return
-
     const { default: html2pdf } = await import('html2pdf.js')
     const opt = {
       margin: 10,
@@ -179,28 +203,28 @@ function App() {
       jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const },
       pagebreak: { mode: ['css', 'legacy'] },
     }
-
     await html2pdf().set(opt).from(preview).save()
+  }
+
+  const copyLink = async (text: string, okMsg: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      alert(okMsg)
+    } catch {
+      prompt('아래 링크를 복사해줘', text)
+    }
   }
 
   const shareReadOnlyLink = async () => {
     const url = new URL(window.location.href)
+    url.search = ''
     if (roomId) {
-      url.search = ''
       url.searchParams.set('room', roomId)
-      url.searchParams.set('readonly', '1')
     } else {
-      url.searchParams.set('md', encodeMdParam(markdown))
-      url.searchParams.set('readonly', '1')
+      url.searchParams.set('md', encodeMdParam(markdownText))
     }
-
-    const text = url.toString()
-    try {
-      await navigator.clipboard.writeText(text)
-      alert('읽기 전용 공유 링크가 복사됐어!')
-    } catch {
-      prompt('아래 링크를 복사해줘', text)
-    }
+    url.searchParams.set('readonly', '1')
+    await copyLink(url.toString(), '읽기 전용 공유 링크가 복사됐어!')
   }
 
   const shareCollabLink = async () => {
@@ -209,14 +233,7 @@ function App() {
     const url = new URL(window.location.href)
     url.search = ''
     url.searchParams.set('room', id)
-    const text = url.toString()
-
-    try {
-      await navigator.clipboard.writeText(text)
-      alert('공동 편집 링크가 복사됐어!')
-    } catch {
-      prompt('아래 링크를 복사해줘', text)
-    }
+    await copyLink(url.toString(), '공동 편집 링크가 복사됐어!')
   }
 
   return (
@@ -234,12 +251,17 @@ function App() {
 
       <section className={readOnly ? 'split readonly' : 'split'}>
         {!readOnly && (
-          <textarea
-            value={markdown}
-            onChange={(e) => setMarkdown(e.target.value)}
-            className="editor"
-            spellCheck={false}
-          />
+          <div className="editorWrap">
+            <CodeMirror
+              value={markdownText}
+              height="100%"
+              extensions={editorExtensions}
+              onChange={(value) => {
+                if (syncingRef.current) return
+                setMarkdownText(value)
+              }}
+            />
+          </div>
         )}
 
         <article id="preview" className="preview markdown-body">
@@ -257,7 +279,7 @@ function App() {
               },
             }}
           >
-            {markdown}
+            {markdownText}
           </ReactMarkdown>
         </article>
       </section>
