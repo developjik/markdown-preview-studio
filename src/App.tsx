@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import mermaid from 'mermaid'
+import * as Y from 'yjs'
+import { WebrtcProvider } from 'y-webrtc'
 import 'highlight.js/styles/github-dark.css'
 import './App.css'
 
@@ -18,6 +20,7 @@ const SAMPLE = `# Markdown Preview Studio
 - Dark Mode
 - Auto Save
 - Export HTML / PDF
+- Collaboration (Room)
 
 ### Mermaid
 
@@ -25,14 +28,6 @@ const SAMPLE = `# Markdown Preview Studio
 graph TD
   A[Write Markdown] --> B[Preview]
   B --> C[Export]
-\`\`\`
-
-### Code
-
-\`\`\`ts
-function greet(name: string) {
-  return \`Hello, \${name}\`
-}
 \`\`\`
 `
 
@@ -88,8 +83,13 @@ function encodeMdParam(value: string) {
   return btoa(unescape(encodeURIComponent(value)))
 }
 
+function randomRoom() {
+  return `room-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function App() {
   const [readOnly, setReadOnly] = useState<boolean>(false)
+  const [roomId, setRoomId] = useState<string | null>(null)
   const [markdown, setMarkdown] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search)
     const mdParam = params.get('md')
@@ -97,15 +97,59 @@ function App() {
     return decoded || localStorage.getItem('md-content') || SAMPLE
   })
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem('md-dark') === '1')
+  const yTextRef = useRef<Y.Text | null>(null)
+  const syncingRef = useRef(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    setReadOnly(params.get('readonly') === '1')
+    const readonly = params.get('readonly') === '1'
+    const room = params.get('room')
+    setReadOnly(readonly)
+    setRoomId(room)
   }, [])
 
   useEffect(() => {
+    if (!roomId) return
+
+    const ydoc = new Y.Doc()
+    const provider = new WebrtcProvider(roomId, ydoc)
+    const yText = ydoc.getText('markdown')
+    yTextRef.current = yText
+
+    if (yText.length === 0 && markdown) {
+      yText.insert(0, markdown)
+    } else {
+      syncingRef.current = true
+      setMarkdown(yText.toString())
+      syncingRef.current = false
+    }
+
+    const observer = () => {
+      syncingRef.current = true
+      setMarkdown(yText.toString())
+      syncingRef.current = false
+    }
+
+    yText.observe(observer)
+
+    return () => {
+      yText.unobserve(observer)
+      provider.destroy()
+      ydoc.destroy()
+      yTextRef.current = null
+    }
+  }, [roomId])
+
+  useEffect(() => {
+    if (roomId) {
+      if (!syncingRef.current && yTextRef.current && yTextRef.current.toString() !== markdown) {
+        yTextRef.current.delete(0, yTextRef.current.length)
+        yTextRef.current.insert(0, markdown)
+      }
+      return
+    }
     if (!readOnly) localStorage.setItem('md-content', markdown)
-  }, [markdown, readOnly])
+  }, [markdown, readOnly, roomId])
 
   useEffect(() => {
     localStorage.setItem('md-dark', dark ? '1' : '0')
@@ -141,10 +185,16 @@ function App() {
 
   const shareReadOnlyLink = async () => {
     const url = new URL(window.location.href)
-    url.searchParams.set('md', encodeMdParam(markdown))
-    url.searchParams.set('readonly', '1')
-    const text = url.toString()
+    if (roomId) {
+      url.search = ''
+      url.searchParams.set('room', roomId)
+      url.searchParams.set('readonly', '1')
+    } else {
+      url.searchParams.set('md', encodeMdParam(markdown))
+      url.searchParams.set('readonly', '1')
+    }
 
+    const text = url.toString()
     try {
       await navigator.clipboard.writeText(text)
       alert('읽기 전용 공유 링크가 복사됐어!')
@@ -153,13 +203,30 @@ function App() {
     }
   }
 
+  const shareCollabLink = async () => {
+    const id = roomId || randomRoom()
+    if (!roomId) setRoomId(id)
+    const url = new URL(window.location.href)
+    url.search = ''
+    url.searchParams.set('room', id)
+    const text = url.toString()
+
+    try {
+      await navigator.clipboard.writeText(text)
+      alert('공동 편집 링크가 복사됐어!')
+    } catch {
+      prompt('아래 링크를 복사해줘', text)
+    }
+  }
+
   return (
     <main className={dark ? 'app dark' : 'app'}>
       <header className="top">
-        <h1>Markdown Preview Studio {readOnly ? '(Read Only)' : ''}</h1>
+        <h1>Markdown Preview Studio {readOnly ? '(Read Only)' : roomId ? `(Room: ${roomId})` : ''}</h1>
         <div className="actions">
           <button onClick={() => setDark((d) => !d)}>{dark ? 'Light' : 'Dark'} Mode</button>
-          {!readOnly && <button onClick={shareReadOnlyLink}>Share Link</button>}
+          {!readOnly && <button onClick={shareCollabLink}>Share Collab</button>}
+          {!readOnly && <button onClick={shareReadOnlyLink}>Share Readonly</button>}
           <button onClick={exportHtml}>Export HTML</button>
           <button onClick={exportPdf}>Export PDF</button>
         </div>
