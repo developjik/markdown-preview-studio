@@ -52,6 +52,10 @@ button {
   height: calc(100vh - 78px);
 }
 
+.split.readonly {
+  grid-template-columns: 1fr;
+}
+
 .editor,
 .preview {
   width: 100%;

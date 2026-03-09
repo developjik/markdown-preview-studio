@@ -76,13 +76,36 @@ function MermaidBlock({ chart }: { chart: string }) {
   return <div className="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
+function decodeMdParam(value: string) {
+  try {
+    return decodeURIComponent(escape(atob(value)))
+  } catch {
+    return null
+  }
+}
+
+function encodeMdParam(value: string) {
+  return btoa(unescape(encodeURIComponent(value)))
+}
+
 function App() {
-  const [markdown, setMarkdown] = useState<string>(() => localStorage.getItem('md-content') || SAMPLE)
+  const [readOnly, setReadOnly] = useState<boolean>(false)
+  const [markdown, setMarkdown] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search)
+    const mdParam = params.get('md')
+    const decoded = mdParam ? decodeMdParam(mdParam) : null
+    return decoded || localStorage.getItem('md-content') || SAMPLE
+  })
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem('md-dark') === '1')
 
   useEffect(() => {
-    localStorage.setItem('md-content', markdown)
-  }, [markdown])
+    const params = new URLSearchParams(window.location.search)
+    setReadOnly(params.get('readonly') === '1')
+  }, [])
+
+  useEffect(() => {
+    if (!readOnly) localStorage.setItem('md-content', markdown)
+  }, [markdown, readOnly])
 
   useEffect(() => {
     localStorage.setItem('md-dark', dark ? '1' : '0')
@@ -116,24 +139,41 @@ function App() {
     await html2pdf().set(opt).from(preview).save()
   }
 
+  const shareReadOnlyLink = async () => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('md', encodeMdParam(markdown))
+    url.searchParams.set('readonly', '1')
+    const text = url.toString()
+
+    try {
+      await navigator.clipboard.writeText(text)
+      alert('읽기 전용 공유 링크가 복사됐어!')
+    } catch {
+      prompt('아래 링크를 복사해줘', text)
+    }
+  }
+
   return (
     <main className={dark ? 'app dark' : 'app'}>
       <header className="top">
-        <h1>Markdown Preview Studio</h1>
+        <h1>Markdown Preview Studio {readOnly ? '(Read Only)' : ''}</h1>
         <div className="actions">
           <button onClick={() => setDark((d) => !d)}>{dark ? 'Light' : 'Dark'} Mode</button>
+          {!readOnly && <button onClick={shareReadOnlyLink}>Share Link</button>}
           <button onClick={exportHtml}>Export HTML</button>
           <button onClick={exportPdf}>Export PDF</button>
         </div>
       </header>
 
-      <section className="split">
-        <textarea
-          value={markdown}
-          onChange={(e) => setMarkdown(e.target.value)}
-          className="editor"
-          spellCheck={false}
-        />
+      <section className={readOnly ? 'split readonly' : 'split'}>
+        {!readOnly && (
+          <textarea
+            value={markdown}
+            onChange={(e) => setMarkdown(e.target.value)}
+            className="editor"
+            spellCheck={false}
+          />
+        )}
 
         <article id="preview" className="preview markdown-body">
           <ReactMarkdown
