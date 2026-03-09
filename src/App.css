@@ -86,6 +86,22 @@ button {
   padding: 12px;
 }
 
+.mermaid {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.mermaidError {
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+  color: #7f1d1d;
+  border-radius: 8px;
+  padding: 12px;
+}
+
 @media (max-width: 900px) {
   .split {
     grid-template-columns: 1fr;

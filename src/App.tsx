@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import mermaid from 'mermaid'
 import 'highlight.js/styles/github-dark.css'
 import './App.css'
 
@@ -13,9 +14,18 @@ const SAMPLE = `# Markdown Preview Studio
 
 - Live Preview
 - GitHub Flavored Markdown (GFM)
+- Mermaid
 - Dark Mode
 - Auto Save
 - Export HTML / PDF
+
+### Mermaid
+
+\`\`\`mermaid
+graph TD
+  A[Write Markdown] --> B[Preview]
+  B --> C[Export]
+\`\`\`
 
 ### Code
 
@@ -24,17 +34,47 @@ function greet(name: string) {
   return \`Hello, \${name}\`
 }
 \`\`\`
-
-### Table
-
-| Name | Role |
-| --- | --- |
-| developjik | Frontend |
-| preview | Studio |
-
-- [x] 체크리스트
-- [ ] 프로젝트 배포
 `
+
+function MermaidBlock({ chart }: { chart: string }) {
+  const [svg, setSvg] = useState<string>('')
+  const [error, setError] = useState<string>('')
+
+  useEffect(() => {
+    let mounted = true
+    const run = async () => {
+      try {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' })
+        const id = `mmd-${Math.random().toString(36).slice(2)}`
+        const result = await mermaid.render(id, chart)
+        if (mounted) {
+          setSvg(result.svg)
+          setError('')
+        }
+      } catch (e) {
+        if (mounted) {
+          setError(e instanceof Error ? e.message : 'Mermaid render failed')
+          setSvg('')
+        }
+      }
+    }
+    run()
+    return () => {
+      mounted = false
+    }
+  }, [chart])
+
+  if (error) {
+    return (
+      <div className="mermaidError">
+        <p>Mermaid 렌더 실패: {error}</p>
+        <pre>{chart}</pre>
+      </div>
+    )
+  }
+
+  return <div className="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
+}
 
 function App() {
   const [markdown, setMarkdown] = useState<string>(() => localStorage.getItem('md-content') || SAMPLE)
@@ -81,7 +121,20 @@ function App() {
         />
 
         <article id="preview" className="preview markdown-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={{
+              code(props) {
+                const { className, children } = props
+                const match = /language-(\w+)/.exec(className || '')
+                if (match?.[1] === 'mermaid') {
+                  return <MermaidBlock chart={String(children).replace(/\n$/, '')} />
+                }
+                return <code className={className}>{children}</code>
+              },
+            }}
+          >
             {markdown}
           </ReactMarkdown>
         </article>
