@@ -112,6 +112,7 @@ function randomUser() {
 function App() {
   const [readOnly, setReadOnly] = useState(false)
   const [roomId, setRoomId] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('')
   const [markdownText, setMarkdownText] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search)
     const mdParam = params.get('md')
@@ -163,6 +164,12 @@ function App() {
   }, [roomId])
 
   useEffect(() => {
+    if (!statusMessage) return
+    const timer = window.setTimeout(() => setStatusMessage(''), 2400)
+    return () => window.clearTimeout(timer)
+  }, [statusMessage])
+
+  useEffect(() => {
     if (!roomId && !readOnly) localStorage.setItem('md-content', markdownText)
   }, [markdownText, roomId, readOnly])
 
@@ -209,9 +216,10 @@ function App() {
   const copyLink = async (text: string, okMsg: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      alert(okMsg)
+      setStatusMessage(okMsg)
     } catch {
       prompt('아래 링크를 복사해줘', text)
+      setStatusMessage('클립보드 접근이 막혀서 수동 복사가 필요해요.')
     }
   }
 
@@ -224,7 +232,7 @@ function App() {
       url.searchParams.set('md', encodeMdParam(markdownText))
     }
     url.searchParams.set('readonly', '1')
-    await copyLink(url.toString(), '읽기 전용 공유 링크가 복사됐어!')
+    await copyLink(url.toString(), '읽기 전용 공유 링크를 복사했어요.')
   }
 
   const shareCollabLink = async () => {
@@ -233,25 +241,48 @@ function App() {
     const url = new URL(window.location.href)
     url.search = ''
     url.searchParams.set('room', id)
-    await copyLink(url.toString(), '공동 편집 링크가 복사됐어!')
+    await copyLink(url.toString(), '공동 편집 링크를 복사했어요.')
   }
 
   return (
-    <main className={dark ? 'app dark' : 'app'}>
+    <main className={dark ? 'app dark' : 'app'} aria-labelledby="appTitle">
       <header className="top">
-        <h1>Markdown Preview Studio {readOnly ? '(Read Only)' : roomId ? `(Room: ${roomId})` : ''}</h1>
-        <div className="actions">
-          <button onClick={() => setDark((d) => !d)}>{dark ? 'Light' : 'Dark'} Mode</button>
-          {!readOnly && <button onClick={shareCollabLink}>Share Collab</button>}
-          {!readOnly && <button onClick={shareReadOnlyLink}>Share Readonly</button>}
-          <button onClick={exportHtml}>Export HTML</button>
-          <button onClick={exportPdf}>Export PDF</button>
+        <h1 id="appTitle">Markdown Preview Studio {readOnly ? '(Read Only)' : roomId ? `(Room: ${roomId})` : ''}</h1>
+        <div className="actions" role="group" aria-label="문서 작업">
+          <button
+            type="button"
+            onClick={() => setDark((d) => !d)}
+            aria-pressed={dark}
+            aria-label={dark ? '라이트 모드로 전환' : '다크 모드로 전환'}
+          >
+            {dark ? 'Light' : 'Dark'} Mode
+          </button>
+          {!readOnly && (
+            <button type="button" onClick={shareCollabLink} aria-label="공동 편집 링크 복사">
+              Share Collab
+            </button>
+          )}
+          {!readOnly && (
+            <button type="button" onClick={shareReadOnlyLink} aria-label="읽기 전용 링크 복사">
+              Share Readonly
+            </button>
+          )}
+          <button type="button" onClick={exportHtml} aria-label="HTML 파일로 내보내기">
+            Export HTML
+          </button>
+          <button type="button" onClick={exportPdf} aria-label="PDF 파일로 내보내기">
+            Export PDF
+          </button>
         </div>
       </header>
 
+      <p className="srOnly" role="status" aria-live="polite">
+        {statusMessage}
+      </p>
+
       <section className={readOnly ? 'split readonly' : 'split'}>
         {!readOnly && (
-          <div className="editorWrap">
+          <div className="editorWrap" role="region" aria-label="마크다운 편집기">
             <CodeMirror
               value={markdownText}
               height="100%"
@@ -264,7 +295,7 @@ function App() {
           </div>
         )}
 
-        <article id="preview" className="preview markdown-body">
+        <article id="preview" className="preview markdown-body" role="region" aria-label="미리보기 결과">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
