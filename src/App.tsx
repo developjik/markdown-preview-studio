@@ -14,6 +14,9 @@ import { basicSetup } from 'codemirror'
 import 'highlight.js/styles/github-dark.css'
 import './App.css'
 
+let mermaidReady = false
+let mermaidRenderSeq = 0
+
 const SAMPLE = `# Markdown Preview Studio
 
 실시간으로 마크다운을 작성하고 미리보기 하세요.
@@ -52,8 +55,11 @@ function MermaidBlock({ chart }: { chart: string }) {
     let mounted = true
     const run = async () => {
       try {
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' })
-        const id = `mmd-${Math.random().toString(36).slice(2)}`
+        if (!mermaidReady) {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' })
+          mermaidReady = true
+        }
+        const id = `mmd-${mermaidRenderSeq++}`
         const result = await mermaid.render(id, chart)
         if (mounted) {
           setSvg(result.svg)
