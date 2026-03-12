@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -128,6 +128,7 @@ function App() {
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem('md-dark') === '1')
   const [collab, setCollab] = useState<CollabState | null>(null)
   const syncingRef = useRef(false)
+  const deferredMarkdownText = useDeferredValue(markdownText)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -316,7 +317,7 @@ function App() {
               },
             }}
           >
-            {markdownText}
+            {deferredMarkdownText}
           </ReactMarkdown>
         </article>
       </section>
