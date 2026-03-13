@@ -2,7 +2,6 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import mermaid from 'mermaid'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
@@ -14,7 +13,13 @@ import { basicSetup } from 'codemirror'
 import 'highlight.js/styles/github-dark.css'
 import './App.css'
 
+type MermaidApi = {
+  initialize: (config: { startOnLoad: boolean; securityLevel: 'loose'; theme: 'default' }) => void
+  render: (id: string, text: string) => Promise<{ svg: string }>
+}
+
 let mermaidReady = false
+let mermaidModule: MermaidApi | null = null
 let mermaidRenderSeq = 0
 
 const SAMPLE = `# Markdown Preview Studio
@@ -55,6 +60,13 @@ function MermaidBlock({ chart }: { chart: string }) {
     let mounted = true
     const run = async () => {
       try {
+        if (!mermaidModule) {
+          const loaded = await import('mermaid')
+          mermaidModule = loaded.default as MermaidApi
+        }
+        const mermaid = mermaidModule
+        if (!mermaid) return
+
         if (!mermaidReady) {
           mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' })
           mermaidReady = true
